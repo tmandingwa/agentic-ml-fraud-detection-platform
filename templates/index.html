@@ -171,12 +171,10 @@
     .small{ font-size:12px; color:var(--muted); }
     .strong{ font-weight:700; color:var(--text); }
 
-    .charts{
+    /* ✅ Make volumes box scroll like other panels + bigger charts */
+    .chartsScroll{
       padding:12px;
-      display:grid;
-      grid-template-columns:1fr;
-      grid-template-rows: 1fr 1fr;
-      gap:12px;
+      overflow:auto;      /* <-- scroll inside the bottom-left card */
       min-height:0;
     }
     .chartbox{
@@ -184,13 +182,16 @@
       border:1px solid var(--line);
       border-radius:14px;
       padding:10px;
-      min-height:0;
+      margin-bottom:12px;
     }
     .chartbox h3{
       margin:0 0 6px 0;
       font-size:12px;
       color:var(--muted);
       font-weight:700;
+    }
+    .chartCanvasWrap{
+      height:320px;       /* <-- bigger chart area */
     }
     canvas{ width:100% !important; height:100% !important; }
 
@@ -240,6 +241,7 @@
         grid-template-rows: 1fr 1fr 1fr 1fr;
       }
       .metrics{ grid-template-columns: 1fr; }
+      .chartCanvasWrap{ height:280px; }
     }
   </style>
 </head>
@@ -255,12 +257,10 @@
   </div>
 
   <div style="display:flex; gap:10px; align-items:center;">
-    <!-- Resume link -->
     <a class="resumeBtn" href="/static/Timothy_Mandingwa_Resume.pdf" target="_blank" rel="noopener">
       Timothy Mandingwa Resume
     </a>
 
-    <!-- Live indicator -->
     <div class="pill">
       <span id="wsDot" class="dot"></span>
       <span id="wsStatus">Connecting…</span>
@@ -304,16 +304,19 @@
           <span class="chip" id="hourlyTzChip">today hourly (local)</span>
         </div>
       </div>
-      <div class="charts">
+
+      <!-- ✅ Scroll inside this box -->
+      <div class="chartsScroll">
         <div class="chartbox">
           <h3 id="dailyTitle">Daily transaction volume (last 14 days)</h3>
-          <div style="height:calc(100% - 18px);">
+          <div class="chartCanvasWrap">
             <canvas id="dailyChart"></canvas>
           </div>
         </div>
-        <div class="chartbox">
+
+        <div class="chartbox" style="margin-bottom:0;">
           <h3 id="hourlyTitle">Today’s transactions by hour</h3>
-          <div style="height:calc(100% - 18px);">
+          <div class="chartCanvasWrap">
             <canvas id="hourlyChart"></canvas>
           </div>
         </div>
@@ -454,8 +457,7 @@
   };
 
   // -------------------------
-  // Charts (we label local TZ; API currently buckets in UTC)
-  // If you want true per-user timezone bucketing, we'll add tz param endpoints.
+  // Charts
   // -------------------------
   let dailyChart, hourlyChart;
 
@@ -484,18 +486,43 @@
     });
   }
 
+  // ✅ Build a full 00–23 axis + fill missing hours with 0
+  function buildHourlySeries(hourlyRows){
+    const map = new Map();
+    for (const r of (hourlyRows || [])) {
+      // Supports "00:00" or "00" or 0 formats
+      const raw = String(r.hour ?? "");
+      const hh = raw.includes(":") ? raw.split(":")[0] : raw;
+      const h = Number(hh);
+      if (!Number.isNaN(h)) map.set(h, Number(r.count ?? 0));
+    }
+
+    // up to "now" in viewer TZ
+    const now = new Date();
+    const hourNow = Number(now.toLocaleString("en-US", { timeZone: VIEW_TZ, hour: "2-digit", hour12: false }));
+
+    const labels = [];
+    const values = [];
+    for (let h=0; h<=hourNow; h++){
+      labels.push(String(h).padStart(2,"0")+":00");
+      values.push(map.get(h) ?? 0);
+    }
+    return { labels, values };
+  }
+
   async function refreshCharts(){
     try{
       const [daily, hourly] = await Promise.all([
-        fetch("/api/stats/daily_volume?days=14").then(r => r.json()),
-        fetch("/api/stats/hourly_today").then(r => r.json())
+        fetch(`/api/stats/daily_volume?days=14&tz=${encodeURIComponent(VIEW_TZ)}`).then(r => r.json()),
+        fetch(`/api/stats/hourly_today?tz=${encodeURIComponent(VIEW_TZ)}`).then(r => r.json())
       ]);
 
-      const dLabels = daily.map(x => x.day);
-      const dVals = daily.map(x => x.count);
+      const dLabels = (daily || []).map(x => x.day);
+      const dVals = (daily || []).map(x => x.count);
 
-      const hLabels = hourly.map(x => x.hour);
-      const hVals = hourly.map(x => x.count);
+      const hs = buildHourlySeries(hourly);
+      const hLabels = hs.labels;
+      const hVals = hs.values;
 
       if (!dailyChart){
         dailyChart = makeChart(document.getElementById("dailyChart"), dLabels, dVals, "Daily volume");
@@ -512,7 +539,9 @@
         hourlyChart.data.datasets[0].data = hVals;
         hourlyChart.update();
       }
-    } catch(e){}
+    } catch(e){
+      // silent
+    }
   }
 
   // -------------------------
@@ -534,7 +563,7 @@
 
   async function refreshMetrics(){
     try{
-      const m = await fetch("/api/stats/system").then(r => r.json());
+      const m = await fetch(`/api/stats/system?tz=${encodeURIComponent(VIEW_TZ)}`).then(r => r.json());
 
       const cards = [];
       cards.push(metricCard("Total transactions", m.total_txns, "All-time"));
