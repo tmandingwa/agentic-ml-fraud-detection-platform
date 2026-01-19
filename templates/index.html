@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Agentic Fraud Investigator — Live Dashboard</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#0b1020;
+      --panel:#121a33;
+      --text:#e8ecff;
+      --muted:#aab2d5;
+      --line:rgba(255,255,255,.08);
+      --good:#2dd4bf;
+      --warn:#fbbf24;
+      --bad:#fb7185;
+      --chip:#1b2550;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:linear-gradient(180deg, #070b16, var(--bg));
+      color:var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+
+    header{
+      padding:14px 18px;
+      border-bottom:1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:16px;
+    }
+    header h1{
+      font-size:18px;
+      margin:0;
+      letter-spacing:.2px;
+      font-weight:700;
+    }
+    .sub{
+      font-size:12px;
+      color:var(--muted);
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 10px;
+      background:rgba(255,255,255,.06);
+      border:1px solid var(--line);
+      border-radius:999px;
+      font-size:12px;
+      color:var(--muted);
+      white-space:nowrap;
+    }
+    .dot{
+      width:8px;height:8px;border-radius:50%;
+      background:var(--bad);
+      box-shadow:0 0 0 3px rgba(251,113,133,.15);
+    }
+    .dot.on{ background:var(--good); box-shadow:0 0 0 3px rgba(45,212,191,.15); }
+
+    .resumeBtn{
+      display:inline-flex;
+      align-items:center;
+      padding:8px 12px;
+      border-radius:12px;
+      background:#ffffff;
+      color:#0b1020;
+      font-weight:800;
+      border:1px solid rgba(255,255,255,.3);
+      text-decoration:none;
+      white-space:nowrap;
+      box-shadow: 0 8px 22px rgba(0,0,0,.25);
+    }
+    .resumeBtn:hover{ opacity:.95; }
+
+    .wrap{
+      height:calc(100vh - 56px);
+      padding:14px;
+    }
+
+    .grid{
+      height:100%;
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap:12px;
+    }
+
+    .card{
+      background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      border:1px solid var(--line);
+      border-radius:16px;
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      min-height:0;
+    }
+
+    .card .titlebar{
+      padding:10px 12px;
+      border-bottom:1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      background:rgba(0,0,0,.12);
+    }
+    .card h2{
+      font-size:13px;
+      margin:0;
+      font-weight:700;
+      letter-spacing:.2px;
+    }
+    .chiprow{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    .chip{
+      font-size:11px;
+      padding:4px 8px;
+      border-radius:999px;
+      background:var(--chip);
+      border:1px solid var(--line);
+      color:var(--muted);
+    }
+
+    .scroll{
+      padding:10px 12px;
+      overflow:auto;
+      min-height:0;
+    }
+
+    .row{
+      padding:8px 10px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.03);
+      border-radius:12px;
+      margin-bottom:8px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .row .topline{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .tag{
+      font-size:11px;
+      padding:3px 8px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.05);
+      color:var(--muted);
+      white-space:nowrap;
+    }
+    .tag.good{ color:var(--good); border-color:rgba(45,212,191,.35); background:rgba(45,212,191,.08); }
+    .tag.warn{ color:var(--warn); border-color:rgba(251,191,36,.35); background:rgba(251,191,36,.08); }
+    .tag.bad{ color:var(--bad); border-color:rgba(251,113,133,.35); background:rgba(251,113,133,.08); }
+
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .small{ font-size:12px; color:var(--muted); }
+    .strong{ font-weight:700; color:var(--text); }
+
+    .charts{
+      padding:12px;
+      display:grid;
+      grid-template-columns:1fr;
+      grid-template-rows: 1fr 1fr;
+      gap:12px;
+      min-height:0;
+    }
+    .chartbox{
+      background:rgba(255,255,255,.02);
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:10px;
+      min-height:0;
+    }
+    .chartbox h3{
+      margin:0 0 6px 0;
+      font-size:12px;
+      color:var(--muted);
+      font-weight:700;
+    }
+    canvas{ width:100% !important; height:100% !important; }
+
+    .metrics{
+      padding:12px;
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+      overflow:auto;
+      min-height:0;
+    }
+    .metric{
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:10px;
+      background:rgba(255,255,255,.03);
+    }
+    .metric .k{
+      font-size:11px;
+      color:var(--muted);
+      margin-bottom:6px;
+    }
+    .metric .v{
+      font-size:18px;
+      font-weight:800;
+      letter-spacing:.2px;
+    }
+    .metric .hint{
+      margin-top:4px;
+      font-size:11px;
+      color:var(--muted);
+    }
+
+    .pre{
+      white-space:pre-wrap;
+      word-break:break-word;
+      font-size:12px;
+      color:var(--muted);
+      margin:6px 0 0 0;
+    }
+    a{ color:var(--good); text-decoration:none; }
+    a:hover{ text-decoration:underline; }
+
+    @media (max-width: 1000px){
+      .grid{
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr 1fr 1fr 1fr;
+      }
+      .metrics{ grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+<header>
+  <div>
+    <h1>Agentic Fraud Investigator — Live Dashboard</h1>
+    <div class="sub">
+      <span>Streaming transactions → detection → investigation → decision → PDF case files</span>
+      <span class="pill"><span class="mono" id="tzLabel">TZ: …</span></span>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:10px; align-items:center;">
+    <!-- Resume link -->
+    <a class="resumeBtn" href="/static/Timothy_Mandingwa_Resume.pdf" target="_blank" rel="noopener">
+      Timothy Mandingwa Resume
+    </a>
+
+    <!-- Live indicator -->
+    <div class="pill">
+      <span id="wsDot" class="dot"></span>
+      <span id="wsStatus">Connecting…</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="grid">
+
+    <!-- TOP LEFT -->
+    <section class="card">
+      <div class="titlebar">
+        <h2>Transactions (live)</h2>
+        <div class="chiprow">
+          <span class="chip">latest first</span>
+          <span class="chip">local time</span>
+        </div>
+      </div>
+      <div id="txns" class="scroll"></div>
+    </section>
+
+    <!-- TOP RIGHT -->
+    <section class="card">
+      <div class="titlebar">
+        <h2>Alerts / Case Files (live)</h2>
+        <div class="chiprow">
+          <span class="chip">scrolls inside box</span>
+          <span class="chip">PDF links</span>
+        </div>
+      </div>
+      <div id="alerts" class="scroll"></div>
+    </section>
+
+    <!-- BOTTOM LEFT -->
+    <section class="card">
+      <div class="titlebar">
+        <h2>Volumes & Trends</h2>
+        <div class="chiprow">
+          <span class="chip" id="dailyTzChip">daily (local)</span>
+          <span class="chip" id="hourlyTzChip">today hourly (local)</span>
+        </div>
+      </div>
+      <div class="charts">
+        <div class="chartbox">
+          <h3 id="dailyTitle">Daily transaction volume (last 14 days)</h3>
+          <div style="height:calc(100% - 18px);">
+            <canvas id="dailyChart"></canvas>
+          </div>
+        </div>
+        <div class="chartbox">
+          <h3 id="hourlyTitle">Today’s transactions by hour</h3>
+          <div style="height:calc(100% - 18px);">
+            <canvas id="hourlyChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BOTTOM RIGHT -->
+    <section class="card">
+      <div class="titlebar">
+        <h2>System performance</h2>
+        <div class="chiprow">
+          <span class="chip">accuracy proxies</span>
+          <span class="chip">efficiency</span>
+        </div>
+      </div>
+      <div id="metrics" class="metrics"></div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+  // Viewer timezone
+  const VIEW_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  document.getElementById("tzLabel").textContent = `TZ: ${VIEW_TZ}`;
+  document.getElementById("dailyTitle").textContent = `Daily transaction volume (last 14 days) — ${VIEW_TZ}`;
+  document.getElementById("hourlyTitle").textContent = `Today’s transactions by hour — ${VIEW_TZ}`;
+
+  // Convert ISO/Date to local readable string
+  function toLocal(ts){
+    if (!ts) return "";
+    const d = (ts instanceof Date) ? ts : new Date(ts);
+    return d.toLocaleString(undefined, { timeZone: VIEW_TZ, hour12: false });
+  }
+
+  // -------------------------
+  // WebSocket
+  // -------------------------
+  const wsProto = (location.protocol === "https:") ? "wss" : "ws";
+  const ws = new WebSocket(`${wsProto}://${location.host}/ws`);
+
+  const wsDot = document.getElementById("wsDot");
+  const wsStatus = document.getElementById("wsStatus");
+
+  ws.onopen = () => {
+    wsDot.classList.add("on");
+    wsStatus.textContent = "Live";
+    try { ws.send("start"); } catch (e) {}
+  };
+  ws.onclose = () => {
+    wsDot.classList.remove("on");
+    wsStatus.textContent = "Disconnected";
+  };
+  ws.onerror = () => {
+    wsDot.classList.remove("on");
+    wsStatus.textContent = "Error";
+  };
+
+  // -------------------------
+  // DOM
+  // -------------------------
+  const txnsDiv = document.getElementById("txns");
+  const alertsDiv = document.getElementById("alerts");
+  const metricsDiv = document.getElementById("metrics");
+
+  function riskTag(level){
+    const cls = (level === "LOW") ? "good" : (level === "MEDIUM") ? "warn" : "bad";
+    return `<span class="tag ${cls}">${level}</span>`;
+  }
+  function decisionTag(decision){
+    const cls = (decision === "APPROVE") ? "good" : (decision === "REVIEW") ? "warn" : "bad";
+    return `<span class="tag ${cls}">${decision}</span>`;
+  }
+
+  function addTxn(t, risk, latencyMs){
+    const d = document.createElement("div");
+    const when = toLocal(t.ts || t.timestamp);
+
+    d.className = "row";
+    d.innerHTML = `
+      <div class="topline">
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          ${riskTag(risk.risk_level)}
+          <span class="tag mono">${t.transaction_type || "-"}</span>
+          <span class="tag mono">${t.transaction_status || "-"}</span>
+          <span class="small mono">${when}</span>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <span class="tag mono">latency ${latencyMs ?? "-"} ms</span>
+        </div>
+      </div>
+
+      <div class="small">
+        <span class="strong mono">${t.account_id || "-"}</span>
+        <span class="small">• grade <span class="mono">${t.customer_grade || "-"}</span></span>
+        <span class="small">• ${t.amount} ${t.currency}</span>
+        <span class="small">• ${t.country}</span>
+        <span class="small">• ${t.channel}</span>
+        <span class="small">• ${t.merchant}</span>
+      </div>
+      <div class="small mono">device ${t.device_id} • ip ${t.ip_address}</div>
+    `;
+
+    txnsDiv.prepend(d);
+    while (txnsDiv.childNodes.length > 22) txnsDiv.removeChild(txnsDiv.lastChild);
+  }
+
+  function addAlert(a){
+    const d = document.createElement("div");
+    d.className = "row";
+
+    const pdf = a.pdf_url ? `<a href="${a.pdf_url}" target="_blank">Open PDF case file</a>` : "";
+
+    d.innerHTML = `
+      <div class="topline">
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          ${riskTag(a.risk_level)}
+          ${decisionTag(a.decision)}
+          <span class="tag mono">${a.case_id}</span>
+          <span class="tag mono">score ${a.risk_score}</span>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <span class="tag mono">latency ${a.latency_ms ?? "-"} ms</span>
+        </div>
+      </div>
+      <div class="small">${pdf}</div>
+      <pre class="pre">${a.report_md || ""}</pre>
+    `;
+
+    alertsDiv.prepend(d);
+    while (alertsDiv.childNodes.length > 10) alertsDiv.removeChild(alertsDiv.lastChild);
+  }
+
+  ws.onmessage = (msg) => {
+    const data = JSON.parse(msg.data);
+    if (data.type === "txn") addTxn(data.txn, data.risk, data.latency_ms);
+    if (data.type === "alert") addAlert(data);
+  };
+
+  // -------------------------
+  // Charts (we label local TZ; API currently buckets in UTC)
+  // If you want true per-user timezone bucketing, we'll add tz param endpoints.
+  // -------------------------
+  let dailyChart, hourlyChart;
+
+  function makeChart(ctx, labels, values, title){
+    return new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: title,
+          data: values,
+          tension: 0.25,
+          borderWidth: 2,
+          pointRadius: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: "#aab2d5" }, grid: { color: "rgba(255,255,255,.06)" } },
+          y: { ticks: { color: "#aab2d5" }, grid: { color: "rgba(255,255,255,.06)" } }
+        }
+      }
+    });
+  }
+
+  async function refreshCharts(){
+    try{
+      const [daily, hourly] = await Promise.all([
+        fetch("/api/stats/daily_volume?days=14").then(r => r.json()),
+        fetch("/api/stats/hourly_today").then(r => r.json())
+      ]);
+
+      const dLabels = daily.map(x => x.day);
+      const dVals = daily.map(x => x.count);
+
+      const hLabels = hourly.map(x => x.hour);
+      const hVals = hourly.map(x => x.count);
+
+      if (!dailyChart){
+        dailyChart = makeChart(document.getElementById("dailyChart"), dLabels, dVals, "Daily volume");
+      } else {
+        dailyChart.data.labels = dLabels;
+        dailyChart.data.datasets[0].data = dVals;
+        dailyChart.update();
+      }
+
+      if (!hourlyChart){
+        hourlyChart = makeChart(document.getElementById("hourlyChart"), hLabels, hVals, "Hourly today");
+      } else {
+        hourlyChart.data.labels = hLabels;
+        hourlyChart.data.datasets[0].data = hVals;
+        hourlyChart.update();
+      }
+    } catch(e){}
+  }
+
+  // -------------------------
+  // Metrics
+  // -------------------------
+  function fmt(v){
+    if (v === null || v === undefined) return "—";
+    return String(v);
+  }
+  function metricCard(k, v, hint){
+    return `
+      <div class="metric">
+        <div class="k">${k}</div>
+        <div class="v">${fmt(v)}</div>
+        ${hint ? `<div class="hint">${hint}</div>` : ``}
+      </div>
+    `;
+  }
+
+  async function refreshMetrics(){
+    try{
+      const m = await fetch("/api/stats/system").then(r => r.json());
+
+      const cards = [];
+      cards.push(metricCard("Total transactions", m.total_txns, "All-time"));
+      cards.push(metricCard("Today’s transactions", m.today_txns, `Local TZ: ${VIEW_TZ}`));
+      cards.push(metricCard("Total cases", m.total_cases, "All-time"));
+      cards.push(metricCard("Today’s cases", m.today_cases, "Today"));
+
+      cards.push(metricCard("Chargeback detect rate", m.chargeback_detect_rate, "Proxy for recall (chargeback capture)"));
+      cards.push(metricCard("Avg case risk score", m.avg_case_risk_score, "Severity of created cases"));
+
+      cards.push(metricCard("Avg latency (last 200)", m.avg_latency_ms_200 ? `${m.avg_latency_ms_200} ms` : "—", "Pipeline processing time"));
+      cards.push(metricCard("Recent alert rate", m.alert_rate_recent, "Alerts / txns (recent window)"));
+
+      cards.push(metricCard("WebSocket clients", m.ws_clients, "Connected viewers"));
+      cards.push(metricCard("Data feed", "Live data", "Continuous updates"));
+
+      metricsDiv.innerHTML = cards.join("");
+    } catch(e){}
+  }
+
+  refreshCharts();
+  refreshMetrics();
+  setInterval(refreshCharts, 10000);
+  setInterval(refreshMetrics, 2000);
+</script>
+</body>
+</html>
