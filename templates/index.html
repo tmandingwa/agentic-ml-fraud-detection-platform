@@ -428,7 +428,16 @@
     const d = document.createElement("div");
     d.className = "row";
 
-    const pdf = a.pdf_url ? `<a href="${a.pdf_url}" target="_blank">Open PDF case file</a>` : "";
+    //const pdf = a.pdf_url ? `<a href="${a.pdf_url}" target="_blank">Open PDF case file</a>` : "";
+    // ✅ Always build a working PDF URL from case_id (works even if a.pdf_url is wrong)
+    const pdfUrl = (a.case_id)
+      ? `/api/cases/${encodeURIComponent(a.case_id)}/pdf?download=1`
+      : (a.pdf_url || "");
+
+    const pdf = pdfUrl
+      ? `<a href="${pdfUrl}" target="_blank" rel="noopener">Download PDF case file</a>`
+      : "";
+
 
     d.innerHTML = `
       <div class="topline">

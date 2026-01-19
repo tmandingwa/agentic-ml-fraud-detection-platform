@@ -3,7 +3,7 @@ import os
 import json
 from typing import Set
 from collections import deque
-
+from app.agents_reporting import write_pdf  # add this import at the top (one line)
 from fastapi import FastAPI, WebSocket, Query
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -102,14 +102,43 @@ async def api_case(case_id: str):
     return JSONResponse(r)
 
 @app.get("/api/cases/{case_id}/pdf")
-async def api_case_pdf(case_id: str):
+async def api_case_pdf(case_id: str, download: int = 1):
     r = await get_case(case_id)
     if not r:
         return JSONResponse({"error": "not_found"}, status_code=404)
-    path = r["pdf_path"]
-    if not os.path.exists(path):
+
+    # 1) Try stored path first (may be stale if DB was seeded elsewhere)
+    stored_path = r.get("pdf_path")
+
+    # 2) Always have a safe expected path in the current runtime
+    expected_path = os.path.join(CASE_PDF_DIR, f"{case_id}.pdf")
+
+    path_to_use = None
+    if stored_path and os.path.exists(stored_path):
+        path_to_use = stored_path
+    elif os.path.exists(expected_path):
+        path_to_use = expected_path
+    else:
+        # 3) If PDF missing but report exists, regenerate PDF
+        report_md = r.get("report_md")
+        if report_md:
+            try:
+                write_pdf(report_md, expected_path)
+                if os.path.exists(expected_path):
+                    path_to_use = expected_path
+            except Exception as e:
+                return JSONResponse({"error": "pdf_generate_failed", "detail": str(e)}, status_code=500)
+
+    if not path_to_use:
         return JSONResponse({"error": "pdf_missing"}, status_code=404)
-    return FileResponse(path, media_type="application/pdf", filename=f"{case_id}.pdf")
+
+    # 4) Force download if download=1, otherwise inline open
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{case_id}.pdf"'
+        return FileResponse(path_to_use, media_type="application/pdf", headers=headers)
+
+    return FileResponse(path_to_use, media_type="application/pdf", filename=f"{case_id}.pdf")
 
 # -------- Dashboard stats endpoints (these fix your 404s) --------
 
