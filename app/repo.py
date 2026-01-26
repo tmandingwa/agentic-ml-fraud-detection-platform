@@ -6,7 +6,12 @@ from zoneinfo import ZoneInfo
 from app.db import SessionLocal, engine, Base
 from app.models import Transaction, Case
 
+
 async def init_db():
+    # IMPORTANT: ensure model classes are imported so Base.metadata is populated
+    # (required when DB/volume was wiped and tables need to be recreated)
+    from app import models  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

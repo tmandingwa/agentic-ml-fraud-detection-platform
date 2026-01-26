@@ -3,14 +3,14 @@ import os
 import json
 from typing import Set
 from collections import deque
-from app.agents_reporting import write_pdf  # add this import at the top (one line)
+
 from fastapi import FastAPI, WebSocket, Query
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 from starlette.websockets import WebSocketDisconnect
 
-from app.config import SIM_ENABLED, SIM_TPS, CASE_PDF_DIR, APP_BASE_URL
+from app.config import SIM_ENABLED, SIM_TPS, CASE_PDF_DIR
 from app.repo import init_db, list_cases, get_case, daily_volume, hourly_today, system_metrics, insert_txn
 from app.simulator import stream_transactions, seed_historical_transactions
 from app.pipeline import process_txn
@@ -79,7 +79,9 @@ async def sim_loop():
 
             if result["alert_event"]:
                 alerts_window.append(1)
-                result["alert_event"]["pdf_url"] = f"{APP_BASE_URL}/api/cases/{result['alert_event']['case_id']}/pdf"
+
+                # ✅ Always relative to current host (Railway domain)
+                result["alert_event"]["pdf_url"] = f"/api/cases/{result['alert_event']['case_id']}/pdf"
                 await broadcast(result["alert_event"])
 
         except Exception as e:
@@ -90,7 +92,8 @@ async def sim_loop():
 async def api_cases(limit: int = 50):
     rows = await list_cases(limit=limit)
     for r in rows:
-        r["pdf_url"] = f"{APP_BASE_URL}/api/cases/{r['case_id']}/pdf"
+        # ✅ Always relative
+        r["pdf_url"] = f"/api/cases/{r['case_id']}/pdf"
     return JSONResponse(rows)
 
 @app.get("/api/cases/{case_id}")
@@ -98,49 +101,23 @@ async def api_case(case_id: str):
     r = await get_case(case_id)
     if not r:
         return JSONResponse({"error": "not_found"}, status_code=404)
-    r["pdf_url"] = f"{APP_BASE_URL}/api/cases/{case_id}/pdf"
+    # ✅ Always relative
+    r["pdf_url"] = f"/api/cases/{case_id}/pdf"
     return JSONResponse(r)
 
 @app.get("/api/cases/{case_id}/pdf")
-async def api_case_pdf(case_id: str, download: int = 1):
+async def api_case_pdf(case_id: str):
     r = await get_case(case_id)
     if not r:
         return JSONResponse({"error": "not_found"}, status_code=404)
-
-    # 1) Try stored path first (may be stale if DB was seeded elsewhere)
-    stored_path = r.get("pdf_path")
-
-    # 2) Always have a safe expected path in the current runtime
-    expected_path = os.path.join(CASE_PDF_DIR, f"{case_id}.pdf")
-
-    path_to_use = None
-    if stored_path and os.path.exists(stored_path):
-        path_to_use = stored_path
-    elif os.path.exists(expected_path):
-        path_to_use = expected_path
-    else:
-        # 3) If PDF missing but report exists, regenerate PDF
-        report_md = r.get("report_md")
-        if report_md:
-            try:
-                write_pdf(report_md, expected_path)
-                if os.path.exists(expected_path):
-                    path_to_use = expected_path
-            except Exception as e:
-                return JSONResponse({"error": "pdf_generate_failed", "detail": str(e)}, status_code=500)
-
-    if not path_to_use:
+    path = r["pdf_path"]
+    if not os.path.exists(path):
         return JSONResponse({"error": "pdf_missing"}, status_code=404)
 
-    # 4) Force download if download=1, otherwise inline open
-    headers = {}
-    if download:
-        headers["Content-Disposition"] = f'attachment; filename="{case_id}.pdf"'
-        return FileResponse(path_to_use, media_type="application/pdf", headers=headers)
+    # filename=... makes Content-Disposition attachment in Starlette
+    return FileResponse(path, media_type="application/pdf", filename=f"{case_id}.pdf")
 
-    return FileResponse(path_to_use, media_type="application/pdf", filename=f"{case_id}.pdf")
-
-# -------- Dashboard stats endpoints (these fix your 404s) --------
+# -------- Dashboard stats endpoints --------
 
 @app.get("/api/stats/daily_volume")
 async def api_daily_volume(days: int = 14, tz: str = Query("UTC")):
