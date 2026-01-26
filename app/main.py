@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 from starlette.websockets import WebSocketDisconnect
 
-from app.config import SIM_ENABLED, SIM_TPS, CASE_PDF_DIR
+from app.config import SIM_ENABLED, SIM_TPS, CASE_PDF_DIR, APP_BASE_URL
 from app.repo import init_db, list_cases, get_case, daily_volume, hourly_today, system_metrics, insert_txn
 from app.simulator import stream_transactions, seed_historical_transactions
 from app.pipeline import process_txn
@@ -80,8 +80,8 @@ async def sim_loop():
             if result["alert_event"]:
                 alerts_window.append(1)
 
-                # ✅ Always relative to current host (Railway domain)
-                result["alert_event"]["pdf_url"] = f"/api/cases/{result['alert_event']['case_id']}/pdf"
+                # ✅ FIX: use relative URL so browser doesn't try to resolve "api" as a domain
+                result["alert_event"]["pdf_url"] = f"/api/cases/{result['alert_event']['case_id']}/pdf?download=1"
                 await broadcast(result["alert_event"])
 
         except Exception as e:
@@ -92,8 +92,8 @@ async def sim_loop():
 async def api_cases(limit: int = 50):
     rows = await list_cases(limit=limit)
     for r in rows:
-        # ✅ Always relative
-        r["pdf_url"] = f"/api/cases/{r['case_id']}/pdf"
+        # ✅ FIX: relative URL
+        r["pdf_url"] = f"/api/cases/{r['case_id']}/pdf?download=1"
     return JSONResponse(rows)
 
 @app.get("/api/cases/{case_id}")
@@ -101,12 +101,13 @@ async def api_case(case_id: str):
     r = await get_case(case_id)
     if not r:
         return JSONResponse({"error": "not_found"}, status_code=404)
-    # ✅ Always relative
-    r["pdf_url"] = f"/api/cases/{case_id}/pdf"
+
+    # ✅ FIX: relative URL
+    r["pdf_url"] = f"/api/cases/{case_id}/pdf?download=1"
     return JSONResponse(r)
 
 @app.get("/api/cases/{case_id}/pdf")
-async def api_case_pdf(case_id: str):
+async def api_case_pdf(case_id: str, download: bool = Query(True)):
     r = await get_case(case_id)
     if not r:
         return JSONResponse({"error": "not_found"}, status_code=404)
@@ -114,8 +115,12 @@ async def api_case_pdf(case_id: str):
     if not os.path.exists(path):
         return JSONResponse({"error": "pdf_missing"}, status_code=404)
 
-    # filename=... makes Content-Disposition attachment in Starlette
-    return FileResponse(path, media_type="application/pdf", filename=f"{case_id}.pdf")
+    # ✅ Force download when download=1/true
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{case_id}.pdf"'
+
+    return FileResponse(path, media_type="application/pdf", filename=f"{case_id}.pdf", headers=headers)
 
 # -------- Dashboard stats endpoints --------
 
