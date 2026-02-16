@@ -174,7 +174,7 @@
     /* ✅ Make volumes box scroll like other panels + bigger charts */
     .chartsScroll{
       padding:12px;
-      overflow:auto;      /* <-- scroll inside the bottom-left card */
+      overflow:auto;
       min-height:0;
     }
     .chartbox{
@@ -191,7 +191,7 @@
       font-weight:700;
     }
     .chartCanvasWrap{
-      height:320px;       /* <-- bigger chart area */
+      height:320px;
     }
     canvas{ width:100% !important; height:100% !important; }
 
@@ -257,7 +257,12 @@
   </div>
 
   <div style="display:flex; gap:10px; align-items:center;">
-    <a class="resumeBtn" href="/static/Timothy_Mandingwa_Resume.pdf" target="_blank" rel="noopener">
+    <!-- ✅ CHANGED: add download attr + keep same href -->
+    <a class="resumeBtn"
+       href="/static/Timothy_Mandingwa_Resume.pdf"
+       download="Timothy_Mandingwa_Resume.pdf"
+       target="_blank"
+       rel="noopener">
       Timothy Mandingwa Resume
     </a>
 
@@ -305,10 +310,10 @@
         </div>
       </div>
 
-      <!-- ✅ Scroll inside this box -->
       <div class="chartsScroll">
         <div class="chartbox">
-          <h3 id="dailyTitle">Daily transaction volume (last 14 days)</h3>
+          <!-- ✅ CHANGED: 7 days text -->
+          <h3 id="dailyTitle">Daily transaction volume (last 7 days)</h3>
           <div class="chartCanvasWrap">
             <canvas id="dailyChart"></canvas>
           </div>
@@ -342,19 +347,18 @@
   // Viewer timezone
   const VIEW_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   document.getElementById("tzLabel").textContent = `TZ: ${VIEW_TZ}`;
-  document.getElementById("dailyTitle").textContent = `Daily transaction volume (last 14 days) — ${VIEW_TZ}`;
+
+  // ✅ CHANGED: 7 days text
+  document.getElementById("dailyTitle").textContent = `Daily transaction volume (last 7 days) — ${VIEW_TZ}`;
   document.getElementById("hourlyTitle").textContent = `Today’s transactions by hour — ${VIEW_TZ}`;
 
-  // Convert ISO/Date to local readable string
   function toLocal(ts){
     if (!ts) return "";
     const d = (ts instanceof Date) ? ts : new Date(ts);
     return d.toLocaleString(undefined, { timeZone: VIEW_TZ, hour12: false });
   }
 
-  // -------------------------
   // WebSocket
-  // -------------------------
   const wsProto = (location.protocol === "https:") ? "wss" : "ws";
   const ws = new WebSocket(`${wsProto}://${location.host}/ws`);
 
@@ -375,9 +379,7 @@
     wsStatus.textContent = "Error";
   };
 
-  // -------------------------
   // DOM
-  // -------------------------
   const txnsDiv = document.getElementById("txns");
   const alertsDiv = document.getElementById("alerts");
   const metricsDiv = document.getElementById("metrics");
@@ -428,8 +430,6 @@
     const d = document.createElement("div");
     d.className = "row";
 
-    //const pdf = a.pdf_url ? `<a href="${a.pdf_url}" target="_blank">Open PDF case file</a>` : "";
-    // ✅ Always build a working PDF URL from case_id (works even if a.pdf_url is wrong)
     const pdfUrl = (a.case_id)
       ? `/api/cases/${encodeURIComponent(a.case_id)}/pdf?download=1`
       : (a.pdf_url || "");
@@ -437,7 +437,6 @@
     const pdf = pdfUrl
       ? `<a href="${pdfUrl}" target="_blank" rel="noopener">Download PDF case file</a>`
       : "";
-
 
     d.innerHTML = `
       <div class="topline">
@@ -465,9 +464,7 @@
     if (data.type === "alert") addAlert(data);
   };
 
-  // -------------------------
   // Charts
-  // -------------------------
   let dailyChart, hourlyChart;
 
   function makeChart(ctx, labels, values, title){
@@ -495,18 +492,15 @@
     });
   }
 
-  // ✅ Build a full 00–23 axis + fill missing hours with 0
   function buildHourlySeries(hourlyRows){
     const map = new Map();
     for (const r of (hourlyRows || [])) {
-      // Supports "00:00" or "00" or 0 formats
       const raw = String(r.hour ?? "");
       const hh = raw.includes(":") ? raw.split(":")[0] : raw;
       const h = Number(hh);
       if (!Number.isNaN(h)) map.set(h, Number(r.count ?? 0));
     }
 
-    // up to "now" in viewer TZ
     const now = new Date();
     const hourNow = Number(now.toLocaleString("en-US", { timeZone: VIEW_TZ, hour: "2-digit", hour12: false }));
 
@@ -522,7 +516,8 @@
   async function refreshCharts(){
     try{
       const [daily, hourly] = await Promise.all([
-        fetch(`/api/stats/daily_volume?days=14&tz=${encodeURIComponent(VIEW_TZ)}`).then(r => r.json()),
+        // ✅ CHANGED: days=7
+        fetch(`/api/stats/daily_volume?days=7&tz=${encodeURIComponent(VIEW_TZ)}`).then(r => r.json()),
         fetch(`/api/stats/hourly_today?tz=${encodeURIComponent(VIEW_TZ)}`).then(r => r.json())
       ]);
 
@@ -553,9 +548,7 @@
     }
   }
 
-  // -------------------------
   // Metrics
-  // -------------------------
   function fmt(v){
     if (v === null || v === undefined) return "—";
     return String(v);

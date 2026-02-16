@@ -1,6 +1,7 @@
 import asyncio, random, uuid
 from datetime import datetime, timezone, timedelta
 from typing import AsyncIterator, Dict
+import os  # ✅ NEW
 
 # --- Use-cases (your list) ---
 TX_TYPES = ["P2P_SEND", "AIRTIME_RECHARGE", "DSTV_PAYMENT", "CASHOUT", "CASHIN", "MERCHPAY"]
@@ -137,11 +138,22 @@ async def stream_transactions(tps: float = 2.0) -> AsyncIterator[Dict]:
         yield txn
         await asyncio.sleep(min_sleep)
 
-async def seed_historical_transactions(insert_txn_fn, days: int = 14, target_total: int = 12000):
+async def seed_historical_transactions(insert_txn_fn, days: int = 14, target_total: int = 12000, flag_path: str = "seeded.flag"):
     """
     Seeds ~14 days of retrospective data, distributed across days and hours.
     insert_txn_fn is usually app.repo.insert_txn
+
+    ✅ NEW: uses a flag file so it only seeds once per volume.
     """
+    # ✅ NEW: only seed once (per persistent volume)
+    try:
+        if os.path.exists(flag_path):
+            print(f"[seed] skip: already seeded (found {flag_path})")
+            return
+    except Exception:
+        # if filesystem is weird, just continue seeding (better than crashing)
+        pass
+
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
 
@@ -154,7 +166,7 @@ async def seed_historical_transactions(insert_txn_fn, days: int = 14, target_tot
             "grade": random.choices(GRADES, weights=GRADE_WEIGHTS, k=1)[0]
         })
 
-    for _ in range(target_total):
+    for i in range(target_total):
         a = random.choice(accounts)
         tx_type = random.choice(TX_TYPES)
         meta = USECASE_META[tx_type]
@@ -187,3 +199,15 @@ async def seed_historical_transactions(insert_txn_fn, days: int = 14, target_tot
         }
 
         await insert_txn_fn(txn)
+
+        # optional progress log every 1k
+        if (i + 1) % 1000 == 0:
+            print(f"[seed] inserted {i+1}/{target_total}")
+
+    # ✅ NEW: write flag file after successful seed
+    try:
+        with open(flag_path, "w", encoding="utf-8") as f:
+            f.write(datetime.now(timezone.utc).isoformat())
+        print(f"[seed] done, wrote {flag_path}")
+    except Exception as e:
+        print("[seed] done but could not write flag:", repr(e))

@@ -4,6 +4,7 @@ from sqlalchemy.exc import ProgrammingError
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import asyncio
+from sqlalchemy import delete, text
 
 from app.db import SessionLocal, engine, Base
 from app.models import Transaction, Case
@@ -259,6 +260,49 @@ async def hourly_today(tz: str = "UTC"):
         return [{"hour": r[0].strftime("%H:00"), "count": int(r[1])} for r in rows]
 
     return await _retry_on_missing_table(_do)
+#
+
+async def purge_old_data(days: int = 7) -> dict:
+    """
+    Keep only last `days` of data in transactions + cases.
+    Deletes:
+      - transactions older than cutoff
+      - cases older than cutoff
+    """
+    await _ensure_tables()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    async def _do():
+        async with SessionLocal() as s:
+            # delete cases first (if cases reference transactions)
+            res_cases = await s.execute(
+                delete(Case).where(Case.created_at < cutoff)
+            )
+
+            res_txns = await s.execute(
+                delete(Transaction).where(Transaction.ts < cutoff)
+            )
+
+            await s.commit()
+
+            # Optional: vacuum occasionally (don’t do every request; but ok in periodic job)
+            # Note: VACUUM cannot run inside a transaction block in some configs,
+            # so execute it carefully. If it fails, ignore.
+            try:
+                await s.execute(text("VACUUM (ANALYZE)"))
+            except Exception:
+                pass
+
+        return {
+            "cutoff": cutoff.isoformat(),
+            "deleted_cases": int(res_cases.rowcount or 0),
+            "deleted_txns": int(res_txns.rowcount or 0),
+        }
+
+    return await _retry_on_missing_table(_do)
+
+
+#
 
 async def system_metrics(tz: str = "UTC"):
     await _ensure_tables()

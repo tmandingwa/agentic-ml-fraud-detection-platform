@@ -11,7 +11,16 @@ from starlette.requests import Request
 from starlette.websockets import WebSocketDisconnect
 
 from app.config import SIM_ENABLED, SIM_TPS, CASE_PDF_DIR, APP_BASE_URL
-from app.repo import init_db, list_cases, get_case, daily_volume, hourly_today, system_metrics, insert_txn
+from app.repo import (
+    init_db,
+    list_cases,
+    get_case,
+    daily_volume,
+    hourly_today,
+    system_metrics,
+    insert_txn,
+    purge_old_data,   # ✅ NEW: retention cleanup
+)
 from app.simulator import stream_transactions, seed_historical_transactions
 from app.pipeline import process_txn
 
@@ -24,21 +33,50 @@ latency_window = deque(maxlen=200)   # ms
 alerts_window = deque(maxlen=200)
 tx_window = deque(maxlen=200)
 
+# ✅ NEW: retention settings (keep only last 7 days)
+RETENTION_DAYS = 7
+RETENTION_INTERVAL_HOURS = 6  # run cleanup every 6 hours
+
+
+async def retention_loop():
+    """Background job to keep DB storage bounded."""
+    while True:
+        try:
+            result = await purge_old_data(days=RETENTION_DAYS)
+            print(f"[retention] purged old rows: {result}")
+        except Exception as e:
+            # don't crash the app if cleanup fails
+            print("[retention] cleanup failed:", repr(e))
+        await asyncio.sleep(RETENTION_INTERVAL_HOURS * 60 * 60)
+
+
 @app.on_event("startup")
 async def on_startup():
     os.makedirs(CASE_PDF_DIR, exist_ok=True)
     await init_db()
 
+    # ✅ NEW: run cleanup once on boot (important after redeploy)
+    try:
+        result = await purge_old_data(days=RETENTION_DAYS)
+        print(f"[startup retention] purged old rows: {result}")
+    except Exception as e:
+        print("[startup retention] cleanup failed:", repr(e))
+
+    # ✅ NEW: start periodic cleanup in background
+    asyncio.create_task(retention_loop())
+
     # Seed 14 days historical (for graphs)
     # NOTE: safe because txn_id is uuid-based now (no duplicates)
-    await seed_historical_transactions(insert_txn_fn=insert_txn, days=14, target_total=12000)
+    await seed_historical_transactions(insert_txn_fn=insert_txn, days=7, target_total=12000)
 
     if SIM_ENABLED:
         asyncio.create_task(sim_loop())
 
+
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
 
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
@@ -52,6 +90,7 @@ async def ws(websocket: WebSocket):
     except Exception:
         clients.discard(websocket)
 
+
 async def broadcast(payload: dict):
     if not clients:
         return
@@ -64,6 +103,7 @@ async def broadcast(payload: dict):
             dead.append(ws)
     for ws in dead:
         clients.discard(ws)
+
 
 async def sim_loop():
     async for txn in stream_transactions(tps=SIM_TPS):
@@ -88,6 +128,7 @@ async def sim_loop():
             print("SIM LOOP ERROR:", repr(e))
             await asyncio.sleep(0.25)
 
+
 @app.get("/api/cases")
 async def api_cases(limit: int = 50):
     rows = await list_cases(limit=limit)
@@ -95,6 +136,7 @@ async def api_cases(limit: int = 50):
         # ✅ FIX: relative URL
         r["pdf_url"] = f"/api/cases/{r['case_id']}/pdf?download=1"
     return JSONResponse(rows)
+
 
 @app.get("/api/cases/{case_id}")
 async def api_case(case_id: str):
@@ -105,6 +147,7 @@ async def api_case(case_id: str):
     # ✅ FIX: relative URL
     r["pdf_url"] = f"/api/cases/{case_id}/pdf?download=1"
     return JSONResponse(r)
+
 
 @app.get("/api/cases/{case_id}/pdf")
 async def api_case_pdf(case_id: str, download: bool = Query(True)):
@@ -122,15 +165,18 @@ async def api_case_pdf(case_id: str, download: bool = Query(True)):
 
     return FileResponse(path, media_type="application/pdf", filename=f"{case_id}.pdf", headers=headers)
 
+
 # -------- Dashboard stats endpoints --------
 
 @app.get("/api/stats/daily_volume")
-async def api_daily_volume(days: int = 14, tz: str = Query("UTC")):
+async def api_daily_volume(days: int = 7, tz: str = Query("UTC")):  # ✅ CHANGED default 14 -> 7
     return JSONResponse(await daily_volume(days=days, tz=tz))
+
 
 @app.get("/api/stats/hourly_today")
 async def api_hourly_today(tz: str = Query("UTC")):
     return JSONResponse(await hourly_today(tz=tz))
+
 
 @app.get("/api/stats/system")
 async def api_system(tz: str = Query("UTC")):
