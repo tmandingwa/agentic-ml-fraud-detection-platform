@@ -10,6 +10,9 @@ from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 from starlette.websockets import WebSocketDisconnect
 
+# ✅ NEW: serve /static
+from starlette.staticfiles import StaticFiles
+
 from app.config import SIM_ENABLED, SIM_TPS, CASE_PDF_DIR, APP_BASE_URL
 from app.repo import (
     init_db,
@@ -27,6 +30,20 @@ from app.pipeline import process_txn
 app = FastAPI(title="Agentic Fraud Investigator (Live)")
 templates = Jinja2Templates(directory="templates")
 clients: Set[WebSocket] = set()
+
+# ✅ NEW: static directory + resume path (doesn't break anything if file missing)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))           # .../app
+PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))    # repo root
+STATIC_DIR = os.path.join(PROJECT_ROOT, "static")
+RESUME_FILENAME = "Timothy_Mandingwa_Resume.pdf"
+RESUME_PATH = os.path.join(STATIC_DIR, RESUME_FILENAME)
+
+# ✅ NEW: mount /static so /static/Timothy_Mandingwa_Resume.pdf works
+# Note: only mount if folder exists (prevents crash on misdeploy)
+if os.path.isdir(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+else:
+    print(f"[startup] static dir not found: {STATIC_DIR}")
 
 # lightweight in-memory perf signals (for UI)
 latency_window = deque(maxlen=200)   # ms
@@ -76,6 +93,30 @@ async def on_startup():
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
+
+# ✅ NEW: a dedicated resume download endpoint (forces download)
+@app.get("/resume")
+async def download_resume():
+    if not os.path.exists(RESUME_PATH):
+        return JSONResponse(
+            {
+                "error": "resume_missing",
+                "expected_path": RESUME_PATH,
+                "hint": "Ensure the file exists in the repo at /static/Timothy_Mandingwa_Resume.pdf",
+            },
+            status_code=404,
+        )
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{RESUME_FILENAME}"'
+    }
+    return FileResponse(
+        RESUME_PATH,
+        media_type="application/pdf",
+        filename=RESUME_FILENAME,
+        headers=headers,
+    )
 
 
 @app.websocket("/ws")
