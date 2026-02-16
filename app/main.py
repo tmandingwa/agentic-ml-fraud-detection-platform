@@ -31,6 +31,17 @@ app = FastAPI(title="Agentic Fraud Investigator (Live)")
 templates = Jinja2Templates(directory="templates")
 clients: Set[WebSocket] = set()
 
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
+# ✅ Railway healthcheck endpoint
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 # ✅ NEW: static directory + resume path (doesn't break anything if file missing)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))           # .../app
 PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))    # repo root
