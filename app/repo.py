@@ -303,6 +303,27 @@ async def purge_old_data(days: int = 7) -> dict:
 
 
 #
+#
+
+async def init_db():
+    # IMPORTANT: ensure model classes are imported so Base.metadata is populated
+    from app import models  # noqa: F401
+
+    # Retry DB connection on startup (Railway sometimes starts app before DB is ready)
+    import asyncio
+    for attempt in range(1, 11):  # ~ up to ~30 seconds total
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            return
+        except Exception as e:
+            # Connection refused / temporary startup ordering
+            if attempt == 10:
+                raise
+            await asyncio.sleep(min(3, 0.5 * attempt))
+
+
+#
 
 async def system_metrics(tz: str = "UTC"):
     await _ensure_tables()

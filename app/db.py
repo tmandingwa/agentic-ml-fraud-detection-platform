@@ -1,16 +1,37 @@
+# app/db.py
 import os
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-
-# Railway often gives: postgres://... or postgresql://...
-# SQLAlchemy async needs: postgresql+asyncpg://...
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
-elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-
-engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
-SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 Base = declarative_base()
+
+def _build_async_db_url() -> str:
+    url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or os.getenv("POSTGRES_URL_NON_POOLING")
+    if not url:
+        raise RuntimeError("DATABASE_URL is not set (Railway Variables).")
+
+    # Railway/Heroku sometimes use postgres://
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+
+    # Ensure async driver
+    if url.startswith("postgresql://") and "postgresql+asyncpg://" not in url:
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    return url
+
+DATABASE_URL = _build_async_db_url()
+
+# SSL: hosted postgres commonly requires it (safe even if not required)
+connect_args = {"ssl": True}
+
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10,
+    connect_args=connect_args,
+)
+
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
